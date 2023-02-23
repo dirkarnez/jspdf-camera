@@ -5,23 +5,132 @@
     <meta charset="UTF-8">
     <meta http-equiv="X-UA-Compatible" content="IE=edge">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    </style>
 </head>
 
 <body>
     <input id="myFileInput" type="file" accept="image/*" capture="camera">
-
+    
     <script>
-        var myInput = document.getElementById('myFileInput');
-        
-        myInput.addEventListener('change', function () {
-            var file = myInput.files[0];
+        const readImage = file => new Promise(resolve => {
+            const reader = new FileReader();
+            reader.onload = event => {
+                const result = new Uint8Array(event.target.result);
 
-            // Send file here either by adding it to a `FormData` object 
-            // and sending that via XHR, or by simply passing the file into 
-            // the `send` method of an XHR instance.
+                const props = jpegProps(result);
 
-            console.log(file);
-        }, false);
+                const data = {
+                    fileName: file.name, 
+                    width: props.w, 
+                    height: props.h, 
+                    orientation: getOrientation(result), 
+                    content: result
+                };
+                const { content, ...rest } = data;
+                console.log(JSON.stringify({...rest}));
+                resolve(data)
+            }
+            reader.readAsArrayBuffer(file)
+        });
+
+        function getOrientation(dataUint8Array) {
+            var view = new DataView(dataUint8Array.buffer);
+            if (view.getUint16(0, false) != 0xFFD8) {
+                return -2; //not jpeg
+            }
+            var length = view.byteLength, offset = 2;
+            while (offset < length) {
+                if (view.getUint16(offset + 2, false) <= 8) return callback(-1);
+                var marker = view.getUint16(offset, false);
+                offset += 2;
+                if (marker == 0xFFE1) {
+                    if (view.getUint32(offset += 2, false) != 0x45786966) {
+                        return -1;//not defined
+                    }
+
+                    var little = view.getUint16(offset += 6, false) == 0x4949;
+                    offset += view.getUint32(offset + 4, little);
+                    var tags = view.getUint16(offset, little);
+                    offset += 2;
+                    for (var i = 0; i < tags; i++) {
+                        if (view.getUint16(offset + (i * 12), little) == 0x0112) {
+                            return view.getUint16(offset + (i * 12) + 8, little); //defined
+                        }
+                    }
+                }
+                else if ((marker & 0xFF00) != 0xFF00) {
+                    break;
+                }
+                else {
+                    offset += view.getUint16(offset, false);
+                }
+            }
+            return -1;//not defined
+        }
+
+        function jpegProps(data) {          // data is an array of bytes
+            var off = 0;
+            while (off < data.length) {
+                while (data[off] == 0xff) off++;
+                var mrkr = data[off]; off++;
+
+                if (mrkr == 0xd8) continue;    // SOI
+                if (mrkr == 0xd9) break;       // EOI
+                if (0xd0 <= mrkr && mrkr <= 0xd7) continue;
+                if (mrkr == 0x01) continue;    // TEM
+
+                var len = (data[off] << 8) | data[off + 1]; off += 2;
+
+                if (mrkr == 0xc0) return {
+                    bpc: data[off],     // precission (bits per channel)
+                    h: (data[off + 1] << 8) | data[off + 2],
+                    w: (data[off + 3] << 8) | data[off + 4],
+                    cps: data[off + 5]    // number of color components
+                }
+                off += len - 2;
+            }
+        }
+
+        (() => {
+            const images = [
+                // {fileName: "", content: []}
+            ];
+
+            var myInput = document.getElementById('myFileInput');
+
+            myInput.addEventListener('change', function () {
+                readImage(this.files[0])
+                    .then(imgData => {
+                        images.push(imgData);
+
+                        const doc = new jspdf.jsPDF({
+                            unit: 'px' // this is a must
+                        });;
+
+                        doc.deletePage(1); // this is a must
+
+                        images.reduce((_doc, current) => {
+                            switch (current.orientation) {
+                            case 0:
+                            case -1:
+                            case 1:
+                                _doc.addPage([current.width, current.height], current.width > current.height ? "landscape" : "portrait");
+                                _doc.addImage(current.content, 'JPEG', 0, 0, current.width, current.height, current.name, "NONE", 0);
+                                break;
+                            case 6:
+                                debugger;
+                                _doc.addPage([current.height, current.width], current.width > current.height ? "portrait" : "landscape");
+                                _doc.addImage(current.content, 'JPEG', 0, 0-current.width, current.width, current.height, current.name, "NONE", -90);
+                                break;
+                            default:
+                                console.log(`Sorry, not a jpeg.`);
+                            }
+                        }, doc);
+                        doc.save('output.pdf');
+                    });
+            }, false);
+        })();
     </script>
 </body>
 
