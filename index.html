@@ -6,6 +6,7 @@
     <meta http-equiv="X-UA-Compatible" content="IE=edge">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jimp/0.22.5/jimp.min.js" integrity="sha512-CkAQ+g6KA0J2SKJvHw7XTif8IgRwlvCtR0QjzEYcjFyxuvLLi5NlK3I1mQ4JvnQoD7rASZ0JPoFdjKivz+rtLA==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
     </style>
 </head>
 
@@ -20,16 +21,36 @@
 
                 const props = jpegProps(result);
 
-                const data = {
-                    fileName: file.name, 
-                    width: props.w, 
-                    height: props.h, 
-                    orientation: getOrientation(result), 
-                    content: result
-                };
-                const { content, ...rest } = data;
-                console.log(JSON.stringify({...rest}));
-                resolve(data)
+                Jimp.read(event.target.result)
+                .then(function (imgData) {
+                    imgData
+                    .rotate(0, false) // resize and do not resize
+                    .getBuffer(Jimp.MIME_JPEG, (err, buffer) => {
+                        const resultEdited = new Uint8Array(buffer);
+
+                        var decoder = new TextDecoder('utf8');
+                        //var b64encoded = btoa(decoder.decode(resultEdited));
+                        const propsEdited = jpegProps(resultEdited);
+
+                        const data = {
+                            fileName: file.name, 
+                            width: propsEdited.w, 
+                            height: propsEdited.h, 
+                            orientation: getOrientation(resultEdited), 
+                            content: resultEdited
+                        };
+
+                        const { content, ...rest } = data;
+                       // console.log(b64encoded);
+                        console.log(JSON.stringify({...rest}));
+                        resolve(data);
+                    });
+
+                })
+                .catch(function (err) {
+                    console.error(err);
+                });
+
             }
             reader.readAsArrayBuffer(file)
         });
@@ -111,21 +132,24 @@
                         doc.deletePage(1); // this is a must
 
                         images.reduce((_doc, current) => {
-                            switch (current.orientation) {
-                            case 0:
-                            case -1:
-                            case 1:
-                                _doc.addPage([current.width, current.height], current.width > current.height ? "landscape" : "portrait");
-                                _doc.addImage(current.content, 'JPEG', 0, 0, current.width, current.height, current.name, "NONE", 0);
-                                break;
-                            case 6:
-                                debugger;
-                                _doc.addPage([current.height, current.width], current.width > current.height ? "portrait" : "landscape");
-                                _doc.addImage(current.content, 'JPEG', 0, 0-current.width, current.width, current.height, current.name, "NONE", -90);
-                                break;
-                            default:
-                                console.log(`Sorry, not a jpeg.`);
-                            }
+                            _doc.addPage([current.width, current.height], "portrait");
+                            _doc.addImage(current.content, 'JPEG', 0, 0, current.width, current.height, current.name, "NONE", 0);
+                            // switch (current.orientation) {
+                            // case 0:
+                            // case -1:
+                            // case 1:
+                            // case 6:
+                            // _doc.addPage([current.width, current.height], current.width > current.height ? "landscape" : "portrait");
+                            //     _doc.addImage(current.content, 'JPEG', 0, 0, current.width, current.height, current.name, "NONE", 0);
+                            //     break;
+                            // // case 6:
+                            // //     debugger;
+                            // //     _doc.addPage([current.height, current.width], current.width > current.height ? "portrait" : "landscape");
+                            // //     _doc.addImage(current.content, 'JPEG', 0, 0-current.width, current.width, current.height, current.name, "NONE", -90);
+                            //     break;
+                            // default:
+                            //     console.log(`Sorry, not a jpeg.`);
+                            // }
                         }, doc);
                         doc.save('output.pdf');
                     });
